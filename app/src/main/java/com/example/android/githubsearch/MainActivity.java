@@ -1,5 +1,7 @@
 package com.example.android.githubsearch;
 
+import android.arch.lifecycle.Observer;
+import android.arch.lifecycle.ViewModelProviders;
 import android.content.Intent;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -18,12 +20,14 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import com.example.android.githubsearch.data.GitHubRepo;
+import com.example.android.githubsearch.data.Status;
 import com.example.android.githubsearch.utils.GitHubUtils;
 
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity
-        implements GitHubSearchAdapter.OnSearchItemClickListener, LoaderManager.LoaderCallbacks<String> {
+        implements GitHubSearchAdapter.OnSearchItemClickListener {
 
     private static final String TAG = MainActivity.class.getSimpleName();
     private static final String REPOS_ARRAY_KEY = "githubRepos";
@@ -35,9 +39,9 @@ public class MainActivity extends AppCompatActivity
     private EditText mSearchBoxET;
     private TextView mLoadingErrorTV;
     private ProgressBar mLoadingPB;
-    private GitHubSearchAdapter mGitHubSearchAdapter;
 
-    private ArrayList<GitHubRepo> mRepos;
+    private GitHubSearchAdapter mGitHubSearchAdapter;
+    private GitHubSearchViewModel mViewModel;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,12 +59,31 @@ public class MainActivity extends AppCompatActivity
         mGitHubSearchAdapter = new GitHubSearchAdapter(this);
         mSearchResultsRV.setAdapter(mGitHubSearchAdapter);
 
-        if (savedInstanceState != null && savedInstanceState.containsKey(REPOS_ARRAY_KEY)) {
-            mRepos = (ArrayList<GitHubRepo>) savedInstanceState.getSerializable(REPOS_ARRAY_KEY);
-            mGitHubSearchAdapter.updateSearchResults(mRepos);
-        }
+        mViewModel = ViewModelProviders.of(this).get(GitHubSearchViewModel.class);
 
-        getSupportLoaderManager().initLoader(GITHUB_SEARCH_LOADER_ID, null, this);
+        mViewModel.getSearchResults().observe(this, new Observer<List<GitHubRepo>>() {
+            @Override
+            public void onChanged(@Nullable List<GitHubRepo> gitHubRepos) {
+                mGitHubSearchAdapter.updateSearchResults(gitHubRepos);
+            }
+        });
+
+        mViewModel.getLoadingStatus().observe(this, new Observer<Status>() {
+            @Override
+            public void onChanged(@Nullable Status status) {
+                if (status == Status.LOADING) {
+                    mLoadingPB.setVisibility(View.VISIBLE);
+                } else if (status == Status.SUCCESS) {
+                    mLoadingPB.setVisibility(View.INVISIBLE);
+                    mSearchResultsRV.setVisibility(View.VISIBLE);
+                    mLoadingErrorTV.setVisibility(View.INVISIBLE);
+                } else {
+                    mLoadingPB.setVisibility(View.INVISIBLE);
+                    mSearchResultsRV.setVisibility(View.INVISIBLE);
+                    mLoadingErrorTV.setVisibility(View.VISIBLE);
+                }
+            }
+        });
 
         Button searchButton = findViewById(R.id.btn_search);
         searchButton.setOnClickListener(new View.OnClickListener() {
@@ -75,13 +98,7 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void doGitHubSearch(String query) {
-        String url = GitHubUtils.buildGitHubSearchURL(query);
-        Log.d(TAG, "querying search URL: " + url);
-
-        Bundle args = new Bundle();
-        args.putString(SEARCH_URL_KEY, url);
-        mLoadingPB.setVisibility(View.VISIBLE);
-        getSupportLoaderManager().restartLoader(GITHUB_SEARCH_LOADER_ID, args, this);
+        mViewModel.loadSearchResults(query);
     }
 
     @Override
@@ -89,43 +106,5 @@ public class MainActivity extends AppCompatActivity
         Intent intent = new Intent(this, RepoDetailActivity.class);
         intent.putExtra(GitHubUtils.EXTRA_GITHUB_REPO, repo);
         startActivity(intent);
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        if (mRepos != null) {
-            outState.putSerializable(REPOS_ARRAY_KEY, mRepos);
-        }
-    }
-
-    @NonNull
-    @Override
-    public Loader<String> onCreateLoader(int i, @Nullable Bundle bundle) {
-        String url = null;
-        if (bundle != null) {
-            url = bundle.getString(SEARCH_URL_KEY);
-        }
-        return new GitHubSearchLoader(this, url);
-    }
-
-    @Override
-    public void onLoadFinished(@NonNull Loader<String> loader, String s) {
-        Log.d(TAG, "Got results from the loader");
-        if (s != null) {
-            mLoadingErrorTV.setVisibility(View.INVISIBLE);
-            mSearchResultsRV.setVisibility(View.VISIBLE);
-            mRepos = GitHubUtils.parseGitHubSearchResults(s);
-            mGitHubSearchAdapter.updateSearchResults(mRepos);
-        } else {
-            mLoadingErrorTV.setVisibility(View.VISIBLE);
-            mSearchResultsRV.setVisibility(View.INVISIBLE);
-        }
-        mLoadingPB.setVisibility(View.INVISIBLE);
-    }
-
-    @Override
-    public void onLoaderReset(@NonNull Loader<String> loader) {
-        // Nothing to do here...
     }
 }
